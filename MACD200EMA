@@ -1,0 +1,526 @@
+//+------------------------------------------------------------------+
+//|                                                 MACD_EMA_NEW.mq4 |
+//|                                            Copyright 2021, iZner |
+//|                                      https://www.renzcarillo.com |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2021, iZner"
+#property link      "https://www.renzcarillo.com"
+#property version   "1.00"
+#property strict
+#property script_show_inputs
+#include <stdlib.mqh> 
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+
+// INPUT THE VALUE OF RISK PER TRADE
+input string Risk = "----RISK SETTINGS----";
+input double riskPerTrade = 0.1; 
+
+// A VALUE OF 1 WILL HAVE 1:1 RISK REWARD RATIO
+input double takeProfitMultiple = 2.1; 
+
+// VALUE OF STOPLOSS WOULD BE DEPENDENT ON THIS MULTIPLE
+input double atrMultiple = 2.0; 
+
+// OPTIMIZABLE VALUES
+input string Optimize = "----OPTIMIZE SETTINGS----";
+input double positiveMacdCrossoverValue1 = 0.0000;
+input double negativeMacdCrossoverValue2 = -0.0000;
+input int emavalue = 200;
+
+// SPECIFY THE NUMBER MARK FOR THIS ALGO BOT
+input string EA_Identifier = "----IDENTIFIER SETTINGS----";
+input int magicNumber = 133133;
+
+// EXIT STRATEGIES\
+input string Exit_Strategy = "----EXIT SETTINGS----";
+input bool useMoveToBreakeven= false; 
+
+// PROP FIRM RULES
+input string Prop_Firm = "----PROP FIRM SETTINGS----";
+
+input bool useClosePositionsOnFriday = true;
+
+input string equityLoss = "-------------------";
+input double equityLossStop = 4.5;
+input bool useDailyLossLimit = true;
+
+input string maximumAbsoluteDrawdownLoss = "-------------------";
+input double maximumAbsDrawdownLoss = 9.5;
+input double inpInitialBalance = 10000.00;
+input bool useAbsoluteDrawdownLimit = true;
+
+input string enableTradeAtTime = "-------------------";
+input bool useEnableTradeAtCertainTime = true;
+
+int OnInit()
+  {
+//---
+
+//---
+   return(INIT_SUCCEEDED);
+  }
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+//---
+   
+  }
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+  
+//--- DECLARATION OF VARIABLES ---//
+
+double atr = iATR(NULL,0,14,0); // Here, we fetch the current 14-period ATR value
+int stopLoss = (int)(atr * atrMultiple / getPipValue()); //you just changed the Point to 0.0001 | We multiply the ATR value by the ATR multiple and divide by the Point constant in order to get a value in points:
+int takeProfit = (int)(stopLoss * takeProfitMultiple) ; // we will use the same pips amount as our take profit, providing 1:1 RR
+double currentMacdFast = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,0);
+double currentMacdSlow = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,0);
+double PreviousMacdFast = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,2);
+double PreviousMacdSlow = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,2);
+double candle1MacdFast = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,1);
+double candle1MacdSlow = iMACD (NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,1);
+double macd1 = iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_MAIN,1);
+double macd2 = iMACD(NULL,0,12,26,9,PRICE_CLOSE,MODE_SIGNAL,1);
+
+double emaTrend01 = iMA (NULL,0,emavalue,0,MODE_EMA,PRICE_CLOSE,1);
+double emaTrend00 = iMA (NULL,0,emavalue,0,MODE_EMA,PRICE_CLOSE,0);
+double lots = calculateLotSize(stopLoss);
+datetime time = TimeCurrent();
+int ticket = 0;
+int signal = 0;
+
+//-----------------------------------------ENTRY SIGNAL-----------------------------------------//  
+
+   if (
+      trend()== "uptrend" //10 CURRENT CANDLE IS ABOVE THE 200 EMA
+   && NoTradesToday() == true // TRUE MEANS ONLY 1 TRADE PER DAY; IF REMOVE THIS FUNCTION ADD // AT THE FRONT
+   && PreviousMacdSlow > PreviousMacdFast //CANDLE[2] MACD CROSSOVER
+   && candle1MacdFast > candle1MacdSlow //CANDLE[1] MACD CROSSOVER
+   && currentMacdFast > currentMacdSlow //CANDLE[0] MACD CROSSOVER
+   && enableTrade(time) == useEnableTradeAtCertainTime //FTMO CLOSES TRADING AT 22:55-00:00, SO I MIGHT AS WELL ADD THIS
+   ) 
+         {
+         signal = 1; //(BUY SIGNAL) price below 0 line, macd crossover,price above the 200 ema
+         }
+         
+   if ( 
+         High[1] < emaTrend01 && High[0] < emaTrend00
+//       trend() == "downtrend" //10 CURRENT CANDLE IS BELOW THE 200 EMA
+//   && NoTradesToday() == true // TRUE MEANS ONLY 1 TRADE PER DAY; IF REMOVE THIS FUNCTION ADD // AT THE FRONT
+   && PreviousMacdSlow < PreviousMacdFast //CANDLE[2] MACD CROSSOVER
+   && candle1MacdFast < candle1MacdSlow  //CANDLE[1] MACD CROSSOVER
+   && currentMacdFast < currentMacdSlow //CANDLE[0] MACD CROSSOVER
+   && macd2 > positiveMacdCrossoverValue1 //ABOVE MACD ZERO LINE
+   && macd2 > positiveMacdCrossoverValue1 //ABOVE MACD ZERO LINE
+   && enableTrade(time) == useEnableTradeAtCertainTime //FTMO CLOSES TRADING AT 22:55-00:00, SO I MIGHT AS WELL ADD THIS
+   )
+         {
+         signal = 2; //(SELL SIGNAL) price above the 0 line,macd crossover, price below the 200 ema
+         }
+   if ( OrdersTotal() == 0 && signal == 1 )
+   {
+   ticket = OrderSend(_Symbol,OP_BUY,lots,Ask,5,Ask-stopLoss*getPipValue(),Ask+takeProfit*getPipValue(),NULL,magicNumber,0,clrGreen);
+   Comment ("stoploss is ", stopLoss,"\n","entry price is " ,Ask,"\n","stoploss price is ",Ask-stopLoss*getPipValue(),
+   "\n","atr value is ",atr);
+   }
+   if ( OrdersTotal() == 0 && signal == 2 )
+   {
+   ticket = OrderSend(_Symbol,OP_SELL,lots,Bid,5,Bid+stopLoss*getPipValue(),Bid-takeProfit*getPipValue(),NULL,magicNumber,0,clrRed);
+   Comment ("stoploss is ", stopLoss,"\n","entry price is " , Bid,"\n","stoploss price is ", Bid+stopLoss*getPipValue(),
+   "\n","atr value is ",atr);
+   }
+   
+//---USE MOVE TO BREAKEVEN FUNCTION---//  
+
+   if (useMoveToBreakeven == true) 
+   {
+   breakEvenStopLoss();
+   }  
+   else// (useMoveToBreakeven == false) 
+   {
+   Comment("\n","\n","\n","\n","\n","\n","Breakeven function is not activated");
+   } 
+   
+///---USE CLOSE ALL POSITIONS ON FRIDAY EVENING (FTMO RULE)----- //
+
+   string hoursAndMinutes = (TimeToString(time,TIME_MINUTES));
+   
+   //CLOSE ALL POSITIONS AT 22:45
+   if (useClosePositionsOnFriday == true 
+   && (StringSubstr((string)hoursAndMinutes,0,5))== "22:45" // CLOSE ALL POSITIONS & ORDERS AT 10:45PM
+   && DayOfWeek() == 5 // 5 REPRESENTS FRIDAY
+   )
+   {
+   CloseThisSymbolAll();
+   }
+   else{
+   }
+   
+//---USE DAILY LOSS LIMIT FUNCTION (FTMO RULE)---//  
+   
+   // THIS IS THE MAXIMUM DRAWDOWN THE BOT CAN ACHIEVE IN A DAY
+   double dailyLossLimitInput = equityLossStop;
+   
+   if (useDailyLossLimit == true) 
+   {
+   dailyLossLimit(dailyLossLimitInput);
+   }  
+   else
+   {
+   Comment("\n","\n","\n","\n","\n","\n","Daily Loss Limit Function is not activated");
+   } 
+   
+//---USE ABSOLUTE DRAWDOWN LIMIT FUNCTION (FTMO RULE) ---// 
+
+   //THIS IS THE MAXIMUM DRAWDON THE BOT CAN ACHIEVE IN ITS LIFETIME
+   double absoluteDrawdownLimitInput = maximumAbsDrawdownLoss;
+   
+   //THIS IS THE INITIAL BALANCE
+   double initialBalance = inpInitialBalance;
+    
+   if (useAbsoluteDrawdownLimit == true) 
+   {
+   absoluteDrawdownLimit(absoluteDrawdownLimitInput,initialBalance);
+   }  
+   else
+   {
+   Comment("\n","\n","\n","\n","\n","\n","Absolute Drawdown Limit Function is not activated");
+   } 
+   
+//---CHECK ORDER SEND---// 
+     
+   if(ticket<0) 
+     { 
+      Print("OrderSend failed with error #",GetLastError()); 
+     } 
+
+}
+//-----------------------------------------LIST OF FUNCTIONS-----------------------------------------//
+//---------------------------------------------------------------------------------------------------//
+//---LOTSIZE FUNCTION---//
+
+double calculateLotSize(int inputStopLoss) // type the stopLoss inside the parameter
+{
+   
+    // Fetch some symbol properties
+    double lotStep = MarketInfo(Symbol(), MODE_LOTSTEP);
+    double minLot  = MarketInfo(Symbol(), MODE_MINLOT); 
+    double maxLot  = MarketInfo(Symbol(), MODE_MAXLOT);
+    double tickVal = MarketInfo(Symbol(), MODE_TICKVALUE);
+ 
+    // Calculate the actual lot size
+    double lotSize = AccountBalance() * riskPerTrade / 100 / (inputStopLoss * tickVal);
+ 
+    return MathMin(
+        maxLot,
+        MathMax(
+            minLot,
+            NormalizeDouble(lotSize / lotStep, 0) * lotStep // This rounds the lotSize to the nearest lotstep interval
+        )
+    ); 
+} 
+
+//---TREND DIRECTION FUNCTION---//
+
+string trend()
+{
+double emaTrend0 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,0);
+double emaTrend1 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,1); 
+double emaTrend2 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,2); 
+double emaTrend3 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,3); 
+double emaTrend4 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,4); 
+double emaTrend5 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,5); 
+double emaTrend6 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,6); 
+double emaTrend7 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,7); 
+double emaTrend8 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,8);  
+double emaTrend9 = iMA (NULL,0,200,0,MODE_EMA,PRICE_CLOSE,9); 
+string signal;
+
+double HighCandle0 = High[0];
+double HighCandle1 = High[1];
+double HighCandle2 = High[2];
+double HighCandle3 = High[3];
+double HighCandle4 = High[4];
+double HighCandle5 = High[5];
+double HighCandle6 = High[6];
+double HighCandle7 = High[7];
+double HighCandle8 = High[8];
+double HighCandle9 = High[9];
+
+double LowCandle0 = Low[0];
+double LowCandle1 = Low[1];
+double LowCandle2 = Low[2];
+double LowCandle3 = Low[3];
+double LowCandle4 = Low[4];
+double LowCandle5 = Low[5];
+double LowCandle6 = Low[6];
+double LowCandle7 = Low[7];
+double LowCandle8 = Low[8];
+double LowCandle9 = Low[9];
+
+if (emaTrend0 > HighCandle0 && emaTrend1 > HighCandle1 && emaTrend2 > HighCandle2 &&emaTrend3 > HighCandle3 &&
+emaTrend4 > HighCandle4 &&emaTrend5 > HighCandle5 &&emaTrend6 > HighCandle6 &&emaTrend7 > HighCandle7 &&
+emaTrend8 > HighCandle8 && emaTrend9 > HighCandle9 )  
+  signal = "downtrend";
+                                 
+else if (emaTrend0 < LowCandle0 && emaTrend1 < LowCandle1 && emaTrend2 < LowCandle2 &&emaTrend3 < LowCandle3 &&
+emaTrend4 < LowCandle4 &&emaTrend5 < LowCandle5 &&emaTrend6 < LowCandle6 &&emaTrend7 < LowCandle7 &&
+emaTrend8 < LowCandle8 && emaTrend9 < LowCandle9 )  
+  signal = "uptrend";
+return signal;
+}
+
+//---GET PIP VALUE FUNCTION---//
+
+double getPipValue()
+{
+int digit = (int)MarketInfo(_Symbol,MODE_DIGITS);
+double result = 0.0;
+if (digit == 5 || digit == 4) 
+{
+result = 0.0001;
+}
+else if (digit == 3 || digit == 2) 
+{
+result = 0.01;
+}
+return result;
+}
+
+//---ACTIVATE ONE TRADE PER DAY FUNCTION---//
+
+bool NoTradesToday()
+  {
+   datetime today = iTime(NULL,PERIOD_D1,0);
+
+   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
+     {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderSymbol()      != _Symbol)  continue;
+      if(OrderMagicNumber() != magicNumber) continue;
+      if(OrderOpenTime()    >= today)    return(false);
+     }
+
+   for(int i=OrdersTotal()-1; i>=0; i--)           
+     {
+      if(!OrderSelect(i,SELECT_BY_POS))  continue;  
+      if(OrderSymbol()      != _Symbol)  continue;  
+      if(OrderMagicNumber() != magicNumber) continue;  
+      if(OrderOpenTime()    >= today)    return(false);
+     }
+
+   return(true);
+  }
+  
+//---MOVE TO BREAKEVEN FUNCTION---//
+
+void breakEvenStopLoss() {
+
+int orderModify;
+
+      for (int i = 0; i < OrdersTotal(); i++)
+      {
+         if (OrderSelect(i, SELECT_BY_POS,MODE_TRADES)) 
+         {
+            //SYMBOL MUST BE THE SAME
+            if (OrderSymbol() == Symbol())
+            {
+               //ORDER TYPE MUST BE THE SAME
+               if ((OrderType() == OP_BUY)) 
+               {  
+                  // PRICE REACHED 1:1 MOVE SL TO BREAKEVEN     
+                  if (Ask>(OrderOpenPrice()-OrderStopLoss()+OrderOpenPrice()) && 
+                  //SINCE WE MOVE THE SL TO BREAKEVEN + ADD HALF PIP TO ACCOUNT FOR SPREAD,
+                  //MEANING THIS COULD ONLY TRIGGER IF PRICE WASN'T MODIFIED YET,
+                  //THUS PREVENTING ORDERMODIFY ERROR 1
+                  //ORDERMODIFY ERROR 1: DOING THE SAME THING OVER & OVER AGAIN WITHOUT CHANGING ANYTHING
+                  (OrderStopLoss()<OrderOpenPrice()))
+                  {
+                     orderModify = OrderModify(OrderTicket() //CHOOSE THE CORRECT TICKET
+                     ,OrderOpenPrice() //ORDER ENTRY PRICE NOT CHANGED, ONLY THE STOPLOSS
+                     ,(OrderOpenPrice()+5*_Point) // SL HAS BEEN CHANGED
+                     ,OrderTakeProfit() // TAKE PROFIT NOT CHANGED, ONLY THE STOPLOSS
+                     ,0 //NO EXPIRATION
+                     ,clrNONE); // NO COLOR
+                     }
+                                     // PRICE REACHED 1:1 MOVE SL TO BREAKEVEN
+                  else if (Bid < (((OrderStopLoss()-OrderOpenPrice())-OrderOpenPrice())*(-1))
+                  //SINCE WE MOVE THE SL TO BREAKEVEN + ADD HALF PIP TO ACCOUNT FOR SPREAD,
+                  //MEANING THIS COULD ONLY TRIGGER IF PRICE WASN'T MODIFIED YET,
+                  //THUS PREVENTING ORDERMODIFY ERROR 1
+                  //ORDERMODIFY ERROR 1: DOING THE SAME THING OVER & OVER AGAIN WITHOUT CHANGING ANYTHING
+                  && (OrderStopLoss()>OrderOpenPrice()))
+                  {
+                     orderModify = OrderModify(OrderTicket() //CHOOSE THE CORRECT TICKET
+                     ,OrderOpenPrice() //ORDER ENTRY PRICE NOT CHANGED, ONLY THE STOPLOSS
+                     ,(OrderOpenPrice()-5*_Point) // SL HAS BEEN CHANGED
+                     ,OrderTakeProfit() // TAKE PROFIT NOT CHANGED, ONLY THE STOPLOSS
+                     ,0 //NO EXPIRATION
+                     ,clrNONE); // NO COLOR
+                     }
+                   }
+                 }
+               }                     
+            }
+         }
+     
+
+//---ENABLE TRADE AT CERTAIN TIME (FTMO RULE)---//
+
+bool enableTrade(datetime inpTime){
+
+  // inpTime would be declared in the OnTick(), it is: datetime time = TimeCurrent();
+  string theHoursAndMinutes = TimeToString(inpTime,TIME_MINUTES);
+  
+  if(
+     ((theHoursAndMinutes >= "00:01") //START TRADING AT THIS TIME
+  && (theHoursAndMinutes <= "22:53" //PAUSE WHEN THIS IS REACHED
+  || theHoursAndMinutes >= "23:07")) //CONTINUE AT THIS TIME
+  &&(DayOfWeek()==1 // THIS IS MONDAY
+  || DayOfWeek()==2 // THIS IS TUESDAY
+  || DayOfWeek()==3 // THIS IS WEDNESDAY
+  || DayOfWeek()==4) // THIS IS THURSDAY
+  )
+  {
+     return true;
+  }
+  else if(theHoursAndMinutes >= "00:01" //START TRADING AT THIS TIME
+  && theHoursAndMinutes <= "18:00" //STOP WHEN THIS IS REACHED
+  && DayOfWeek()==5 // THIS IS FRIDAY
+  )
+  {
+     return true;
+  }
+  else
+  {
+  return false;
+  }
+}
+
+//---CLOSE ALL EXISTING POSITION ON FRIDAY FUNCTION (FTMO RULE)---//
+
+void CloseThisSymbolAll()
+  {
+   int trade;
+   for(trade=OrdersTotal()-1;trade>=0;trade--)
+     {
+      if(!OrderSelect(trade,SELECT_BY_POS,MODE_TRADES))
+        {
+         Print("Error: ",ErrorDescription(GetLastError()));
+         return;
+        }
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=magicNumber) continue;
+         if(OrderType()==OP_BUY)
+            {
+            if(!OrderClose(OrderTicket(),OrderLots(),Bid,5,Blue))
+            ErrorDescription(GetLastError());
+         if(OrderType()==OP_SELL)
+            {
+            if(!OrderClose(OrderTicket(),OrderLots(),Ask,5,Red))
+            ErrorDescription(GetLastError());
+            }
+         if(OrderType()==OP_BUYLIMIT ||OrderType()==OP_SELLLIMIT ||
+         OrderType()==OP_BUYSTOP||OrderType()==OP_SELLSTOP)
+            {
+            if(!OrderDelete(OrderTicket(),Blue))
+            ErrorDescription(GetLastError());
+            }
+        }
+     }
+  }
+
+//--- DEACTIVATE BOT IF DAILY EQUITY LOSS REACHED (FTMO RULE)---//
+
+int dailyLossLimit (double inpEquityEquivalent){ 
+   
+   double equity = AccountEquity();
+   double balance = AccountBalance();
+   string currentDay = TimeToString(iTime(_Symbol,PERIOD_D1,0));
+   datetime currentTime1 = TimeCurrent();
+   string time1 = TimeToString(currentTime1,TIME_MINUTES);
+   int orderclose,orderdelete;
+   static double newdaybalance;
+   
+   //GET THE STARTING BALANCE EACH DAY
+   if (time1=="00:00"){ newdaybalance = balance ; } 
+   
+      //CLOSE ALL OPEN AND PENDING ORDERS WHEN INPUT DAILY EQUITY LOSS LIMIT IS REACHED
+      for (int i = OrdersTotal()-1 ; i >=0 ; i--){        
+         if ( (equity) < ((newdaybalance) - (newdaybalance * (inpEquityEquivalent / 100)))){     
+               if (OrderSelect(i,SELECT_BY_POS,MODE_TRADES)){
+                  if (OrderSymbol() != _Symbol || OrderMagicNumber() != magicNumber) continue;
+                     if (OrderType() == OP_BUY || OrderType() == OP_SELL) {
+                     orderclose = OrderClose(OrderTicket(),OrderLots(),Bid,5,Red);
+                     }
+                     if (
+                        OrderType() == OP_BUYLIMIT 
+                     || OrderType() == OP_SELLLIMIT
+                     || OrderType() == OP_BUYSTOP
+                     || OrderType() == OP_SELLSTOP
+                     ) {
+                     orderdelete = OrderDelete(OrderTicket());
+                     }
+                  }         
+               } 
+            }  
+      
+      //DISABLE TRADING AND REMOVE EXPERT ADVISOR WHEN PENDING/OPEN ORDER IS CLOSED
+      for(int i=OrdersHistoryTotal()-1; i>=0; i--)
+      {
+      if ( (equity) < ((newdaybalance) - (newdaybalance * (inpEquityEquivalent / 100)))){
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderSymbol()      != _Symbol)  continue;
+      if(OrderMagicNumber() != magicNumber) continue;
+      if(OrderCloseTime()    != 0)    ExpertRemove();
+      }
+   } 
+ return (INIT_SUCCEEDED);
+}
+
+//--- DEACTIVATE BOT IF ABSOLUTE DRAWDOWN LIMIT IS REACHED (FTMO RULE)---//
+
+int absoluteDrawdownLimit (double inpEquityEquivalent, double inpBalanceDrawdown){ 
+   
+   double equity = AccountEquity();
+   int orderclose,orderdelete;
+   
+      //CLOSE ALL OPEN AND PENDING ORDERS WHEN INPUT ABSOLUTE DRAWDOWN LIMIT IS REACHED
+      for (int i = OrdersTotal()-1 ; i >=0 ; i--){        
+         if ( (equity) < ((inpBalanceDrawdown) - (inpBalanceDrawdown * (inpEquityEquivalent / 100)))){     
+               if (OrderSelect(i,SELECT_BY_POS,MODE_TRADES)){
+                  if (OrderSymbol() != _Symbol || OrderMagicNumber() != magicNumber) continue;
+                     if (OrderType() == OP_BUY || OrderType() == OP_SELL) {
+                     orderclose = OrderClose(OrderTicket(),OrderLots(),Bid,5,Red);
+                     }
+                     if (
+                        OrderType() == OP_BUYLIMIT 
+                     || OrderType() == OP_SELLLIMIT
+                     || OrderType() == OP_BUYSTOP
+                     || OrderType() == OP_SELLSTOP
+                     ) {
+                     orderdelete = OrderDelete(OrderTicket());
+                     }
+                  }         
+               } 
+            }  
+      
+      //DISABLE TRADING AND REMOVE EXPERT ADVISOR WHEN PENDING/OPEN ORDER IS CLOSED
+      for(int i=OrdersHistoryTotal()-1; i>=0; i--)
+      {
+      if ( (equity) < ((inpBalanceDrawdown) - (inpBalanceDrawdown * (inpEquityEquivalent / 100)))){
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderSymbol()      != _Symbol)  continue;
+      if(OrderMagicNumber() != magicNumber) continue;
+      if(OrderCloseTime()    != 0)    ExpertRemove();
+      }
+   } 
+ return (INIT_SUCCEEDED);
+}
